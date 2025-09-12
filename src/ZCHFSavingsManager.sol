@@ -272,13 +272,15 @@ contract ZCHFSavingsManager is AccessControl, ReentrancyGuard {
     }
 
     /// @notice Moves funds from the savings module to a receiver, either to collect fees or migrate balances.
-    /// @dev Intentional: Does not validate available balance; excess requests may silently transfer less via the savings module's logic.
+    /// @dev Reverts if not enough funds are available in the savings module.
     /// @param receiver Must have RECEIVER_ROLE
-    /// @param amount The maximum amount of ZCHF to withdraw
+    /// @param amount The maximum amount of ZCHF to move
     function moveZCHF(address receiver, uint192 amount) public onlyRole(OPERATOR_ROLE) nonReentrant {
         if (amount == 0) revert ZeroAmount();
         if (!hasRole(RECEIVER_ROLE, receiver)) revert InvalidReceiver(receiver);
-        savingsModule.withdraw(receiver, amount);
+        
+        uint256 movedAmount = savingsModule.withdraw(receiver, amount);
+        if (movedAmount != amount) revert UnexpectedWithdrawalAmount();
     }
 
     /// @notice Recovers arbitrary ERC-20 tokens or ETH accidentally sent to this contract

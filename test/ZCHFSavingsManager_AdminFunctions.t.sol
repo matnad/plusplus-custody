@@ -33,7 +33,7 @@ contract ZCHFSavingsManager_AdminFunctions is ZCHFSavingsManagerTestBase {
 
     /// @notice moveZCHF() should call withdraw() on the savings module and
     /// forward the amount to the receiver. If the requested amount is larger
-    /// than the saved balance, the entire balance should be withdrawn.
+    /// than the saved balance, it should revert.
     function testMoveZCHFWithdrawsCorrectAmount() public {
         // Create a deposit to fund the savings module with 2000 units
         depositExample(bytes32(uint256(1)), 2_000, user);
@@ -51,10 +51,8 @@ contract ZCHFSavingsManager_AdminFunctions is ZCHFSavingsManagerTestBase {
         // Case 2: withdraw more than available
         uint192 oversized = 10_000;
         vm.prank(operator);
+        vm.expectRevert(abi.encodeWithSelector(IZCHFErrors.UnexpectedWithdrawalAmount.selector));
         manager.moveZCHF(receiver, oversized);
-        // The mock will clamp to the remaining balance of 1_500
-        assertEq(savings.lastWithdrawAmount(), 1_500);
-        assertEq(savings.saved(), 0);
     }
 
     /// @notice Only the operators should be able to call rescueTokens().
