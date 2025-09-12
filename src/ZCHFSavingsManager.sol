@@ -16,7 +16,6 @@ interface IERC20 {
 interface IFrankencoinSavings {
     function save(uint192 amount) external;
     function currentTicks() external view returns (uint64);
-    function ticks(uint256 timestamp) external view returns (uint64);
     function currentRatePPM() external view returns (uint24);
     function INTEREST_DELAY() external view returns (uint64);
     function withdraw(address target, uint192 amount) external returns (uint256);
@@ -94,9 +93,6 @@ contract ZCHFSavingsManager is AccessControl, ReentrancyGuard {
 
     /// @notice Thrown when withdrawal from the savings module is not the expected amount
     error UnexpectedWithdrawalAmount();
-
-    /// @notice Thrown when a timestamp is before the last rate change, which would cause an underflow in the savings module
-    error TimestampBeforeLastRateChange(uint256 timestamp);
 
     /// @notice Initializes the manager and grants initial roles
     /// @dev This contract grants itself RECEIVER_ROLE for internal redemptions.
@@ -199,7 +195,7 @@ contract ZCHFSavingsManager is AccessControl, ReentrancyGuard {
 
             if (initialAmount == 0) revert DepositNotFound(id);
 
-            (, uint192 netInterest) = getDepositDetailsAt(id, block.timestamp);
+            (, uint192 netInterest) = getDepositDetails(id);
             uint192 totalForDeposit = initialAmount + netInterest;
 
             emit DepositRedeemed(id, totalForDeposit);
@@ -215,26 +211,14 @@ contract ZCHFSavingsManager is AccessControl, ReentrancyGuard {
     }
 
     /// @notice Returns the current principal and net interest for a given deposit
-    /// @dev A wrapper around `getDepositDetailsAt()` using the current block timestamp
+    /// @dev Accrual is calculated from `ticksAtDeposit` to current tick count.
     /// @param identifier The unique identifier of the deposit
     /// @return initialAmount The originally deposited amount (principal)
-    /// @return netInterest The interest accrued to date after deducting the fee
-    function getDepositDetails(bytes32 identifier) public view returns (uint192 initialAmount, uint192 netInterest) {
-        return getDepositDetailsAt(identifier, block.timestamp);
-    }
-
-    /// @notice Returns the principal and net interest for a given deposit at a specified timestamp
-    /// @dev Accrual is calculated from `ticksAtDeposit` to current tick count at `timestamp`.
-    /// If the timestamp is in the future, the current rate will be used to compute interest.
-    /// Fee is computed linearly using elapsed time since `createdAt`.
-    /// @param identifier The unique identifier of the deposit
-    /// @param timestamp The timestamp at which to calculate interest
-    /// @return initialAmount The originally deposited amount (principal)
-    /// @return netInterest The interest accrued at that time after fee deduction
+    /// @return netInterest The interest accrued after fee deduction
     /// @custom:audit The deposit is subject to a delay before accruing interest. The fees are calculated over the full duration (including delay).
     /// @custom:audit Fee logic depends on `FEE_ANNUAL_PPM`; ensure alignment with business rules and edge cases (e.g. short duration).
     /// @custom:audit The clamp ensures net interest is never negative. We guarantee the return of the principal under normal circumstances.
-    function getDepositDetailsAt(bytes32 identifier, uint256 timestamp)
+    function getDepositDetails(bytes32 identifier)
         public
         view
         returns (uint192 initialAmount, uint192 netInterest)
@@ -245,16 +229,7 @@ contract ZCHFSavingsManager is AccessControl, ReentrancyGuard {
         if (initialAmount == 0) return (0, 0);
 
         uint40 createdAt = deposit.createdAt;
-        if (createdAt > timestamp) return (initialAmount, 0);
-
-        // If timestamp is before the last rate change (ticksAnchor), the savings module will revert with an underflow
-        // ticksAnchor is set as a private variable, so we cannot check it directly.
-        uint64 currentTicks;
-        try savingsModule.ticks(timestamp) returns (uint64 result) {
-            currentTicks = result;
-        } catch {
-            revert TimestampBeforeLastRateChange(timestamp);
-        }
+        uint64 currentTicks = savingsModule.currentTicks();
 
         uint64 ticksAtDeposit = deposit.ticksAtDeposit;
         uint64 deltaTicks = currentTicks > ticksAtDeposit ? currentTicks - ticksAtDeposit : 0;
@@ -263,7 +238,7 @@ contract ZCHFSavingsManager is AccessControl, ReentrancyGuard {
         uint256 totalInterest = (uint256(deltaTicks) * initialAmount) / 1_000_000 / 365 days;
 
         // Fee is time-based, not tick-based. Converts elapsed time to tick-equivalent.
-        uint256 duration = timestamp - createdAt;
+        uint256 duration = block.timestamp - createdAt;
         uint256 feeableTicks = duration * FEE_ANNUAL_PPM;
 
         // Cap the fee to ensure it's never higher than the actual earned ticks
@@ -273,7 +248,7 @@ contract ZCHFSavingsManager is AccessControl, ReentrancyGuard {
 
         // Net interest must not be negative
         // The following clamp is not strictly required, since we clamp the feeTicks above.
-        // However might still include it to be explicit and futureproof.
+        // It is still included to be explicit and futureproof.
         netInterest = totalInterest > fee ? uint192(totalInterest - fee) : 0;
 
         return (initialAmount, netInterest);

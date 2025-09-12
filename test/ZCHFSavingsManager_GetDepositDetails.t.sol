@@ -6,8 +6,8 @@ import {ZCHFSavingsManagerTestBase} from "./helpers/ZCHFSavingsManagerTestBase.s
 import {ZCHFSavingsManager} from "src/ZCHFSavingsManager.sol";
 
 /// @title ZCHFSavingsManager_GetDepositDetails
-/// @notice Tests for the view functions getDepositDetails() and
-/// getDepositDetailsAt(). These tests verify that interest and fees are
+/// @notice Tests for the view functions getDepositDetails().
+/// This test verifies that interest and fees are
 /// computed correctly under various scenarios, including boundary cases.
 contract ZCHFSavingsManager_GetDepositDetails is ZCHFSavingsManagerTestBase {
     /// @notice Non-existent deposits should return (0,0).

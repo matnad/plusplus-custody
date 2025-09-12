@@ -210,7 +210,7 @@ contract ZCHFSavingsManagerForkRateChangeTest is Test {
         // Compute/validate each deposit's accrued net interest and payout
         for (uint256 i = 0; i < 2; i++) {
             bytes32 id = i == 0 ? id1 : id2;
-            (uint192 principal, uint192 net) = manager.getDepositDetailsAt(id, tsRedemption);
+            (uint192 principal, uint192 net) = manager.getDepositDetails(id);
             assertTrue(principal == (i == 0 ? amt1 : amt2));
             // Assert that net interest is within reasonable expected bounds
             assertTrue(net >= 0);
@@ -252,7 +252,7 @@ contract ZCHFSavingsManagerForkRateChangeTest is Test {
         uint256 ts = block.timestamp + 300 days;
         vm.warp(ts);
 
-        (uint192 princ, uint192 net) = manager.getDepositDetailsAt(id, ts);
+        (uint192 princ, uint192 net) = manager.getDepositDetails(id);
         // The gross interest should be low, and fee should cap any net interest to 0
         assertEq(princ, amount);
         assertTrue(net == 0);
@@ -272,7 +272,7 @@ contract ZCHFSavingsManagerForkRateChangeTest is Test {
         // Advance 1 year
         vm.warp(block.timestamp + 365 days);
 
-        (uint192 p, uint192 net) = manager.getDepositDetailsAt(id, block.timestamp);
+        (uint192 p, uint192 net) = manager.getDepositDetails(id);
         // Fee would be 1250, gross only 30 => net must be 0
         assertEq(p, amount);
         assertEq(net, 0);
@@ -281,26 +281,6 @@ contract ZCHFSavingsManagerForkRateChangeTest is Test {
         vm.prank(operator);
         manager.redeemDeposits(_arr1(id), receiver);
         assertEq(zchf.balanceOf(receiver), amount);
-    }
-
-    // --- DETAILS AT TIME BEFORE RATE CHANGE ---
-    // Will revert because savings module can't provide ticks beyond the ticksAnchor
-    function testFork_DetailsAtTimeBeforeRateChange() public {
-        // First deposit
-        bytes32 id1 = keccak256("detailsBeforeChange");
-        uint192 amt1 = 2_000 ether;
-        vm.prank(operator);
-        manager.createDeposits(_arr1(id1), _arr1(amt1), address(this));
-
-        // Advance 100 days then increase rate to 40%
-        vm.warp(block.timestamp + 100 days);
-        uint24 rate2 = 400_000;
-        _scheduleAndApplyRate(rate2);
-
-        // Check details at time before rate change, will underflow on the savings module contract
-        uint256 tsBeforeChange = block.timestamp - 50 days;
-        vm.expectRevert(abi.encodeWithSelector(IZCHFErrors.TimestampBeforeLastRateChange.selector, tsBeforeChange));
-        manager.getDepositDetailsAt(id1, tsBeforeChange);
     }
 
     // === Utilities ===

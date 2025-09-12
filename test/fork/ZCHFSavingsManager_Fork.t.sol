@@ -106,41 +106,6 @@ contract ZCHFSavingsManagerForkTest is Test {
         assertEq(storedTicks, expectedTicksAtDeposit);
     }
 
-    /// @notice Tests that getDepositDetailsAt() matches the off-chain
-    /// calculation for net interest and fees when querying future timestamps
-    /// against the live savings module. This test queries several durations
-    /// without redeeming the deposit.
-    function testFork_GetDepositDetailsAt_VariousTimes() public {
-        bytes32 id = keccak256("forkDetails");
-        uint192 amount = 250 ether;
-        bytes32[] memory ids = new bytes32[](1);
-        ids[0] = id;
-        uint192[] memory amounts = new uint192[](1);
-        amounts[0] = amount;
-        vm.prank(operator);
-        manager.createDeposits(ids, amounts, address(this));
-        // Retrieve deposit metadata
-        (uint192 initial, uint40 createdAt, uint64 ticksAtDeposit) = manager.deposits(id);
-        assertEq(initial, amount);
-
-        // Define several durations to test (in seconds)
-        uint256[7] memory durations = [uint256(0), 2 days, 5 days, 15 days, 90 days, 365 days, 1000 days];
-        for (uint256 i = 0; i < durations.length; i++) {
-            uint256 t = createdAt + durations[i];
-            // Query contract
-            (, uint192 netInterest) = manager.getDepositDetailsAt(id, t);
-            // Compute expected values off-chain
-            uint64 currentTicks = savings.ticks(t);
-            uint64 deltaTicks = currentTicks > ticksAtDeposit ? currentTicks - ticksAtDeposit : 0;
-            uint256 totalInterest = (uint256(deltaTicks) * initial) / 1_000_000 / 365 days;
-            uint256 feeableTicks = (t - createdAt) * manager.FEE_ANNUAL_PPM();
-            uint256 feeTicks = feeableTicks < deltaTicks ? feeableTicks : deltaTicks;
-            uint256 fee = feeTicks * initial / 1_000_000 / 365 days;
-            uint256 expectedNet = totalInterest > fee ? totalInterest - fee : 0;
-            assertEq(netInterest, uint192(expectedNet), "net interest mismatch at duration");
-        }
-    }
-
     /// @notice Tests redeeming a deposit after a period of time on the mainnet
     /// fork. The actual transfer to the receiver should equal the initial
     /// amount plus the net interest computed off-chain. The deposit should
@@ -235,12 +200,12 @@ contract ZCHFSavingsManagerForkTest is Test {
 
         // Advance to 2 days after deposit (within lockout)
         vm.warp(createdAt + 2 days);
-        (, uint192 netInterestAfter2d) = manager.getDepositDetailsAt(id, block.timestamp);
+        (, uint192 netInterestAfter2d) = manager.getDepositDetails(id);
         assertEq(netInterestAfter2d, 0, "Interest should be zero within 3-day lockout");
 
         // Advance to 7 days after deposit (4 days of accrual after lockout ends)
         vm.warp(createdAt + 7 days);
-        (, uint192 netInterestAfter7d) = manager.getDepositDetailsAt(id, block.timestamp);
+        (, uint192 netInterestAfter7d) = manager.getDepositDetails(id);
         assertGt(netInterestAfter7d, 0, "Interest should be positive after 3-day lockout");
 
         // Compute expected interest and fee manually
