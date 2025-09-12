@@ -195,11 +195,12 @@ contract ZCHFSavingsManager is AccessControl, ReentrancyGuard {
         for (uint256 i = 0; i < identifiers.length; ++i) {
             bytes32 id = identifiers[i];
             Deposit storage deposit = deposits[id];
+            uint192 initialAmount = deposit.initialAmount;
 
-            if (deposit.initialAmount == 0) revert DepositNotFound(id);
+            if (initialAmount == 0) revert DepositNotFound(id);
 
             (, uint192 netInterest) = getDepositDetailsAt(id, block.timestamp);
-            uint192 totalForDeposit = deposit.initialAmount + netInterest;
+            uint192 totalForDeposit = initialAmount + netInterest;
 
             emit DepositRedeemed(id, totalForDeposit);
 
@@ -239,9 +240,12 @@ contract ZCHFSavingsManager is AccessControl, ReentrancyGuard {
         returns (uint192 initialAmount, uint192 netInterest)
     {
         Deposit storage deposit = deposits[identifier];
+
         initialAmount = deposit.initialAmount;
         if (initialAmount == 0) return (0, 0);
-        if (deposit.createdAt > timestamp) return (initialAmount, 0);
+
+        uint40 createdAt = deposit.createdAt;
+        if (createdAt > timestamp) return (initialAmount, 0);
 
         // If timestamp is before the last rate change (ticksAnchor), the savings module will revert with an underflow
         // ticksAnchor is set as a private variable, so we cannot check it directly.
@@ -252,13 +256,14 @@ contract ZCHFSavingsManager is AccessControl, ReentrancyGuard {
             revert TimestampBeforeLastRateChange(timestamp);
         }
 
-        uint64 deltaTicks = currentTicks > deposit.ticksAtDeposit ? currentTicks - deposit.ticksAtDeposit : 0;
+        uint64 ticksAtDeposit = deposit.ticksAtDeposit;
+        uint64 deltaTicks = currentTicks > ticksAtDeposit ? currentTicks - ticksAtDeposit : 0;
 
         // Total interest accrued over deposit lifetime (accounts for initial delay via `ticksAtDeposit`)
         uint256 totalInterest = (uint256(deltaTicks) * initialAmount) / 1_000_000 / 365 days;
 
         // Fee is time-based, not tick-based. Converts elapsed time to tick-equivalent.
-        uint256 duration = timestamp - deposit.createdAt;
+        uint256 duration = timestamp - createdAt;
         uint256 feeableTicks = duration * FEE_ANNUAL_PPM;
 
         // Cap the fee to ensure it's never higher than the actual earned ticks

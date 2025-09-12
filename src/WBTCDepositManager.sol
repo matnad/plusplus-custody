@@ -162,13 +162,14 @@ contract WBTCDepositManager is AccessControl, ReentrancyGuard {
         for (uint256 i = 0; i < identifiersLength; ++i) {
             bytes32 id = identifiers[i];
             Deposit memory deposit = deposits[id];
-            if (deposit.principal == 0) revert DepositNotFound(id);
+            uint192 principal = deposit.principal;
+            if (principal == 0) revert DepositNotFound(id);
 
             uint256 value = depositValue(id);
             totalValue += value;
 
-            totalPrincipal -= deposit.principal;
-            principalTimeProductSum -= deposit.principal * deposit.startTime;
+            totalPrincipal -= principal;
+            principalTimeProductSum -= principal * deposit.startTime;
 
             delete deposits[id];
             emit DepositRedeemed(id, value);
@@ -183,7 +184,7 @@ contract WBTCDepositManager is AccessControl, ReentrancyGuard {
     /// @param identifier Unique identifier of the deposit
     /// @return currentValue The current value of the deposit after fee deduction
     function depositValue(bytes32 identifier) public view returns (uint256 currentValue) {
-        Deposit memory deposit = deposits[identifier];
+        Deposit storage deposit = deposits[identifier];
         uint192 principal = deposit.principal;
         if (principal == 0) return 0;
 
