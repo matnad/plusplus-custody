@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.30;
+pragma solidity 0.8.30;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -278,7 +278,7 @@ contract ZCHFSavingsManager is AccessControl, ReentrancyGuard {
     function moveZCHF(address receiver, uint192 amount) public onlyRole(OPERATOR_ROLE) nonReentrant {
         if (amount == 0) revert ZeroAmount();
         if (!hasRole(RECEIVER_ROLE, receiver)) revert InvalidReceiver(receiver);
-        
+
         uint256 movedAmount = savingsModule.withdraw(receiver, amount);
         if (movedAmount != amount) revert UnexpectedWithdrawalAmount();
     }
