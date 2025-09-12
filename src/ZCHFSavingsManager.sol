@@ -135,11 +135,9 @@ contract ZCHFSavingsManager is AccessControl, ReentrancyGuard {
 
         // Pre-validate and sum amounts
         for (uint256 i = 0; i < len; ++i) {
-            bytes32 id = identifiers[i];
             uint192 amt = amounts[i];
 
             if (amt == 0) revert ZeroAmount();
-            if (deposits[id].createdAt != 0) revert DepositAlreadyExists(id);
 
             totalAmount += amt;
         }
@@ -170,6 +168,7 @@ contract ZCHFSavingsManager is AccessControl, ReentrancyGuard {
             bytes32 id = identifiers[i];
             uint192 amt = amounts[i];
 
+            if (deposits[id].createdAt != 0) revert DepositAlreadyExists(id);
             deposits[id] = Deposit({initialAmount: amt, createdAt: ts, ticksAtDeposit: ticksAtDeposit});
 
             emit DepositCreated(id, amt);

@@ -158,4 +158,28 @@ contract ZCHFSavingsManager_CreateDeposits is ZCHFSavingsManagerTestBase {
         assertEq(amt, 0);
         assertEq(savings.saved(), 0);
     }
+
+    function testRevertWhenDuplicateIdsInSingleBatch() public {
+        bytes32 dup = bytes32(uint256(777));
+        bytes32[] memory ids = new bytes32[](2);
+        uint192[] memory amounts = new uint192[](2);
+        ids[0] = dup;
+        ids[1] = dup; // duplicate in the same call
+        amounts[0] = 100;
+        amounts[1] = 200;
+
+        uint256 userBalBefore = token.balanceOf(user);
+        uint256 mgrBalBefore = token.balanceOf(address(manager));
+
+        vm.prank(operator);
+        vm.expectRevert(abi.encodeWithSelector(IZCHFErrors.DepositAlreadyExists.selector, dup));
+        manager.createDeposits(ids, amounts, user);
+
+        // Ensure nothing was persisted
+        (uint192 amtDup,) = manager.getDepositDetails(dup);
+        assertEq(amtDup, 0);
+        assertEq(savings.saved(), 0);
+        assertEq(token.balanceOf(user), userBalBefore);
+        assertEq(token.balanceOf(address(manager)), mgrBalBefore);
+    }
 }
