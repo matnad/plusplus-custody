@@ -51,6 +51,7 @@ contract ZCHFSavingsManagerForkMultiTest is Test {
         manager = new ZCHFSavingsManager(admin, ZCHF_ADDRESS, SAVINGS_MODULE);
         manager.grantRole(manager.OPERATOR_ROLE(), operator);
         manager.grantRole(manager.RECEIVER_ROLE(), receiver);
+        manager.setDailyLimit(operator, 1_000_000e18);
 
         // Impersonate whale to acquire ample ZCHF for deposits
         uint256 supply = 50_000 ether;

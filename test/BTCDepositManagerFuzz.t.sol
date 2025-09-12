@@ -23,6 +23,7 @@ contract WBTCDepositManagerFuzzTest is Test {
         vm.startPrank(admin);
         manager.grantRole(manager.OPERATOR_ROLE(), operator);
         manager.grantRole(manager.RECEIVER_ROLE(), receiver);
+        manager.setDailyLimit(operator, 1_000_000e8);
         vm.stopPrank();
         // Provide operator with large balance and approve manager
         token.mint(operator, type(uint128).max);

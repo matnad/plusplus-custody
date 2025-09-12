@@ -26,6 +26,7 @@ contract WBTCDepositManagerFeesTest is Test {
         vm.startPrank(admin);
         manager.grantRole(manager.OPERATOR_ROLE(), operator);
         manager.grantRole(manager.RECEIVER_ROLE(), receiver);
+        manager.setDailyLimit(operator, 1_000_000e8);
         vm.stopPrank();
         // Provide operator with large balance and approval
         token.mint(operator, 100_000 * 10 ** 8);
@@ -225,6 +226,7 @@ contract WBTCDepositManagerFeesTest is Test {
         vm.startPrank(admin);
         failingManager.grantRole(failingManager.OPERATOR_ROLE(), operator);
         failingManager.grantRole(failingManager.RECEIVER_ROLE(), receiver);
+        failingManager.setDailyLimit(operator, 1_000_000e8);
         vm.stopPrank();
         // Create deposit to generate fees
         failingToken.mint(operator, 1_000);

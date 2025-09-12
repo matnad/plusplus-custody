@@ -3,6 +3,7 @@ pragma solidity 0.8.30;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {RedemptionLimiter} from "./RedemptionLimiter.sol";
 
 /// @notice Minimal ERC-20 interface used for basic token operations
 interface IERC20 {
@@ -28,7 +29,7 @@ interface IFrankencoinSavings {
 /// Funds can only be received by addresses with RECEIVER_ROLE.
 /// @author Plusplus AG (dev@plusplus.swiss)
 /// @custom:security-contact security@plusplus.swiss
-contract ZCHFSavingsManager is AccessControl, ReentrancyGuard {
+contract ZCHFSavingsManager is AccessControl, ReentrancyGuard, RedemptionLimiter {
     /// @notice Role required to create or redeem deposits
     bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
 
@@ -109,6 +110,14 @@ contract ZCHFSavingsManager is AccessControl, ReentrancyGuard {
         // ZCHF.approve(address(savingsModule), type(uint256).max);
     }
 
+    /// @notice Sets the daily redemption limit for a user (in ZCHF).
+    /// @dev Only callable by DEFAULT_ADMIN_ROLE. See {RedemptionLimiter-_setDailyRedemptionLimit}.
+    /// @param user The operator whose limit is being set.
+    /// @param dailyLimit The daily quota (in ZCHF) for the rolling window.
+    function setDailyLimit(address user, uint192 dailyLimit) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        _setDailyRedemptionLimit(user, dailyLimit);
+    }
+
     /// @notice Creates one or more deposits and forwards the total amount to the savings module.
     /// @dev Each deposit is assigned a unique identifier and accrues interest starting after a fixed delay.
     ///      Reverts if any identifier already exists or any amount is zero. Saves once for all.
@@ -173,6 +182,7 @@ contract ZCHFSavingsManager is AccessControl, ReentrancyGuard {
 
     /// @notice Redeems a batch of deposits and forwards the total redeemed funds (principal + net interest) to a receiver.
     /// @dev Each deposit is deleted after redemption. The total amount is withdrawn in a single call to the savings module.
+    ///      Operators must respect their daily redemption limit.
     /// @param identifiers Unique identifiers (hashed customer IDs) of the deposits to redeem
     /// @param receiver Address that will receive the ZCHF; must have RECEIVER_ROLE
     /// @custom:audit Emits event before deletion and withdrawal; all state changes precede external call.
@@ -203,6 +213,8 @@ contract ZCHFSavingsManager is AccessControl, ReentrancyGuard {
             totalAmount += totalForDeposit;
             delete deposits[id];
         }
+
+        _useMyRedemptionQuota(totalAmount);
 
         // Withdraw the full amount from savings to receiver and confirm the amount
         // (Savings module will silently return less if not enough available)

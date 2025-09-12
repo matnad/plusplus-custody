@@ -47,6 +47,7 @@ contract ZCHFSavingsManagerForkGasTest is Test {
         manager = new ZCHFSavingsManager(admin, ZCHF_ADDRESS, SAVINGS_MODULE);
         manager.grantRole(manager.OPERATOR_ROLE(), operator);
         manager.grantRole(manager.RECEIVER_ROLE(), receiver);
+        manager.setDailyLimit(operator, 1_000_000e18);
 
         // Acquire substantial ZCHF from whale
         uint256 supply = 200_000 ether;

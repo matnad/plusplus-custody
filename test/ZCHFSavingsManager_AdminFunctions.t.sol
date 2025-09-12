@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import {ZCHFSavingsManagerTestBase} from "./helpers/ZCHFSavingsManagerTestBase.sol";
 import {IZCHFErrors} from "./interfaces/IZCHFErrors.sol";
+import {RedemptionLimiter} from "src/RedemptionLimiter.sol";
 
 /// @title ZCHFSavingsManager_AdminFunctions
 /// @notice Tests for the administrative functions moveZCHF() and rescueTokens().
@@ -11,6 +12,7 @@ contract ZCHFSavingsManager_AdminFunctions is ZCHFSavingsManagerTestBase {
     // Re-declare events for expectEmit; not used here but kept for completeness.
     event DepositCreated(bytes32 indexed identifier, uint192 amount);
     event DepositRedeemed(bytes32 indexed identifier, uint192 totalAmount);
+    event DailyRedemptionLimitSet(address indexed user, uint192 dailyLimit);
 
     /// @notice Ensure that only the operators can call moveZCHF().
     function testRevertMoveZCHFWhenNotOperator() public {
@@ -158,5 +160,83 @@ contract ZCHFSavingsManager_AdminFunctions is ZCHFSavingsManagerTestBase {
         vm.prank(operator);
         vm.expectRevert();
         manager.addZCHF(brokeSource, amount);
+    }
+
+    /*//////////////////////////////////////////////////////////////////////////
+                         Withdrawal Quota (Admin) Tests
+    //////////////////////////////////////////////////////////////////////////*/
+
+    /// @notice Only DEFAULT_ADMIN_ROLE may set the daily limit
+    function testSetDailyLimit_RevertWhen_NotAdmin() public {
+        address normalUser = makeAddr("notAdmin");
+        vm.prank(normalUser);
+        vm.expectRevert(); // AccessControl revert
+        manager.setDailyLimit(operator, 1_000);
+    }
+
+    /// @notice setDailyLimit emits event and resets the user's window to full
+    function testSetDailyLimit_EmitsAndResetsWindow() public {
+        uint192 limit = 1_234;
+
+        vm.expectEmit(true, true, false, true);
+        emit DailyRedemptionLimitSet(operator, limit);
+
+        // Call as admin
+        vm.startPrank(admin);
+        manager.setDailyLimit(operator, limit);
+
+        (uint192 availableAmount, uint64 lastRefillTime) = manager.userRedemptionQuota(operator);
+        assertEq(availableAmount, limit, "available should reset to limit");
+        assertEq(lastRefillTime, uint64(block.timestamp), "lastRefillTime should be now");
+        assertEq(manager.availableRedemptionQuota(operator), uint256(limit), "query should reflect full window");
+    }
+
+    /// @notice availableRedemptionQuota refills linearly with time and clamps to limit
+    function testAvailableRedemptionQuota_RefillsLinearlyAndClamps() public {
+        uint192 limit = 1_000;
+        vm.startPrank(admin);
+        manager.setDailyLimit(operator, limit);
+
+        // Immediately after set: full
+        assertEq(manager.availableRedemptionQuota(operator), uint256(limit));
+
+        // After 6 hours, 25% of limit is refilled (but we're already full)
+        vm.warp(block.timestamp + 6 hours);
+        assertEq(manager.availableRedemptionQuota(operator), uint256(limit), "still clamped to full");
+
+        // Consume half the quota by simulating a redemption
+        // We can't call internal quota function directly; emulate by consuming via a real redemption later.
+        // For admin view test, we manually reduce available by resetting limit smaller and back to limit.
+        vm.startPrank(admin);
+        manager.setDailyLimit(operator, 500); // resets window to 500
+        assertEq(manager.availableRedemptionQuota(operator), 500);
+
+        // After 12 hours at 500/day, refill would put it to full (but clamped to 500)
+        vm.warp(block.timestamp + 12 hours);
+        assertEq(manager.availableRedemptionQuota(operator), 500);
+
+        // Reconfigure back to 1000 should reset to full at new limit
+        vm.startPrank(admin);
+        manager.setDailyLimit(operator, limit);
+        assertEq(manager.availableRedemptionQuota(operator), uint256(limit));
+    }
+
+    /// @notice Setting the limit to zero disables the quota and sets available to zero
+    function testSetDailyLimit_ZeroDisablesQuota() public {
+        uint192 limit = 0;
+
+        vm.expectEmit(true, true, false, true, address(manager));
+        emit DailyRedemptionLimitSet(operator, limit);
+
+        vm.prank(admin);
+        manager.setDailyLimit(operator, limit);
+
+        // available() must be 0 when limit is 0
+        assertEq(manager.availableRedemptionQuota(operator), 0);
+
+        // Storage view: availableAmount becomes 0 and lastRefillTime is updated
+        (uint192 availableAmount, uint64 lastRefillTime) = manager.userRedemptionQuota(operator);
+        assertEq(availableAmount, 0, "available should reset to 0");
+        assertEq(lastRefillTime, uint64(block.timestamp), "lastRefillTime should be now");
     }
 }

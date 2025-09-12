@@ -3,6 +3,7 @@ pragma solidity 0.8.30;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {RedemptionLimiter} from "./RedemptionLimiter.sol";
 
 /// @notice Minimal ERC-20 interface used by {BTCDepositManager}.
 interface IERC20 {
@@ -21,7 +22,7 @@ interface IERC20 {
 /// @custom:audit Custody fee is deducted linearly using `FEE_ANNUAL_PPM`. Ensure business alignment.
 ///      Custody fee does not compound. Fee logic assumes 365-day year and 1_000_000 ppm denominator.
 
-contract WBTCDepositManager is AccessControl, ReentrancyGuard {
+contract WBTCDepositManager is AccessControl, ReentrancyGuard, RedemptionLimiter {
     /// @notice Role required to create and redeem deposits as well as collect fees
     bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
 
@@ -106,6 +107,14 @@ contract WBTCDepositManager is AccessControl, ReentrancyGuard {
         WBTC = IERC20(wbtcToken);
     }
 
+    /// @notice Sets the daily redemption limit for a user (in WBTC).
+    /// @dev Only callable by DEFAULT_ADMIN_ROLE. See {RedemptionLimiter-_setDailyRedemptionLimit}.
+    /// @param user The operator whose limit is being set.
+    /// @param dailyLimit The daily quota (in WBTC) for the rolling window.
+    function setDailyLimit(address user, uint192 dailyLimit) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        _setDailyRedemptionLimit(user, dailyLimit);
+    }
+
     /// @notice Creates one or more WBTC deposits from the given source address.
     /// @dev Each deposit must use a unique identifier and a non-zero amount.
     /// Funds are pulled from `source` and stored in this contract.
@@ -148,6 +157,7 @@ contract WBTCDepositManager is AccessControl, ReentrancyGuard {
     /// @dev Computes current value for each deposit.
     /// Each deposit is deleted after redemption. Emits a `DepositRedeemed` event per ID.
     /// Total transfer is done in a single WBTC call for gas efficiency.
+    /// Operators must respect their daily redemption limit.
     /// @param identifiers Deposit identifiers to redeem (must exist and be non-zero)
     /// @param receiver Recipient address for the redeemed value; must have RECEIVER_ROLE
     function redeemDeposits(bytes32[] calldata identifiers, address receiver)
@@ -174,6 +184,8 @@ contract WBTCDepositManager is AccessControl, ReentrancyGuard {
             delete deposits[id];
             emit DepositRedeemed(id, value);
         }
+
+        _useMyRedemptionQuota(totalValue);
 
         bool success = WBTC.transfer(receiver, totalValue);
         if (!success) revert TransferFailed(receiver, totalValue);

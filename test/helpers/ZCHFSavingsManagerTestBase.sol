@@ -53,10 +53,11 @@ abstract contract ZCHFSavingsManagerTestBase is Test {
         // Deploy the ZCHFSavingsManager with the admin and mocks
         manager = new ZCHFSavingsManager(admin, address(token), address(savings));
 
-        // Grant roles
+        // Grant roles & limits
         vm.startPrank(admin);
         manager.grantRole(OPERATOR_ROLE, operator);
         manager.grantRole(RECEIVER_ROLE, receiver);
+        manager.setDailyLimit(operator, 1_000_000e18);
         vm.stopPrank();
 
         // Mint tokens to the user and this contract for use as deposit

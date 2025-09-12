@@ -65,9 +65,10 @@ contract ZCHFSavingsManagerForkTest is Test {
         // Deploy a new savings manager that points at the live modules
         manager = new ZCHFSavingsManager(admin, ZCHF_ADDRESS, SAVINGS_MODULE);
 
-        // Grant operator and receiver roles to the appropriate addresses
+        // Grant operator and receiver roles to the appropriate addresses and set limit
         manager.grantRole(manager.OPERATOR_ROLE(), operator);
         manager.grantRole(manager.RECEIVER_ROLE(), receiver);
+        manager.setDailyLimit(operator, 1_000_000e18);
 
         // Impersonate the whale to obtain ZCHF for deposits
         uint256 supply = 10_000 ether;

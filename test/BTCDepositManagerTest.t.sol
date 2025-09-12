@@ -6,6 +6,7 @@ import "forge-std/StdCheats.sol";
 
 import {WBTCDepositManager} from "src/WBTCDepositManager.sol";
 import {MockERC20} from "test/utils/MockERC20.sol";
+import {RedemptionLimiter} from "src/RedemptionLimiter.sol";
 
 /// @title WBTCDepositManagerTest
 /// @notice Unit tests covering core deposit and redemption flows for the WBTCDepositManager.
@@ -31,6 +32,7 @@ contract WBTCDepositManagerTest is Test {
         vm.startPrank(admin);
         manager.grantRole(manager.OPERATOR_ROLE(), operator);
         manager.grantRole(manager.RECEIVER_ROLE(), receiver);
+        manager.setDailyLimit(operator, 1_000_000e8);
         vm.stopPrank();
 
         // Seed the operator with an ample balance of WBTC and approve the manager to pull funds
@@ -352,6 +354,7 @@ contract WBTCDepositManagerTest is Test {
         vm.startPrank(admin);
         failingManager.grantRole(failingManager.OPERATOR_ROLE(), operator);
         failingManager.grantRole(failingManager.RECEIVER_ROLE(), receiver);
+        failingManager.setDailyLimit(operator, 1_000_000e8);
         vm.stopPrank();
         // Provide deposit
         failingToken.mint(operator, 100);
@@ -589,5 +592,125 @@ contract WBTCDepositManagerTest is Test {
         vm.prank(nonOperator);
         vm.expectRevert(); // AccessControl revert
         manager.rescueTokens(address(other), receiver, 100);
+    }
+
+    /*//////////////////////////////////////////////////////////////////////////
+                               Withdrawal Quota Tests
+    //////////////////////////////////////////////////////////////////////////*/
+
+    /// @notice Reverts when redeeming without a daily limit set for the operator
+    function testQuota_RevertWhen_LimitNotSetOnRedeem() public {
+        // Fresh manager without a daily limit
+        WBTCDepositManager m2 = new WBTCDepositManager(admin, address(token));
+        vm.startPrank(admin);
+        m2.grantRole(m2.OPERATOR_ROLE(), operator);
+        m2.grantRole(m2.RECEIVER_ROLE(), receiver);
+        vm.stopPrank();
+
+        // Fund operator and approve m2
+        token.mint(operator, 1_000e8);
+        vm.prank(operator);
+        token.approve(address(m2), type(uint256).max);
+
+        // Create a deposit
+        bytes32[] memory ids = new bytes32[](1);
+        uint192[] memory amounts = new uint192[](1);
+        ids[0] = keccak256("quota-no-limit");
+        amounts[0] = 500e8;
+        vm.prank(operator);
+        m2.createDeposits(ids, amounts, operator);
+
+        // Redeem should revert due to missing limit
+        vm.prank(operator);
+        vm.expectRevert(abi.encodeWithSelector(RedemptionLimiter.LimitNotSet.selector));
+        m2.redeemDeposits(ids, receiver);
+    }
+
+    /// @notice Reverts when redeeming more than the available daily quota
+    function testQuota_RevertWhen_ExceedsAvailable() public {
+        // Configure a small daily limit
+        uint192 limit = 1_000e8;
+        vm.prank(admin);
+        manager.setDailyLimit(operator, limit);
+
+        // Create a deposit larger than the limit
+        bytes32[] memory ids = new bytes32[](1);
+        uint192[] memory amounts = new uint192[](1);
+        ids[0] = keccak256("quota-exceed");
+        amounts[0] = 1_200e8;
+
+        vm.prank(operator);
+        manager.createDeposits(ids, amounts, operator);
+
+        // Redeeming now should exceed quota and revert
+        vm.prank(operator);
+        vm.expectRevert(abi.encodeWithSelector(RedemptionLimiter.WithdrawalLimitExceeded.selector));
+        manager.redeemDeposits(ids, receiver);
+    }
+
+    /// @notice Consuming quota reduces availability, which refills linearly over time
+    function testQuota_ConsumeAndRefillOverTime() public {
+        uint192 limit = 1_000e8;
+        vm.prank(admin);
+        manager.setDailyLimit(operator, limit);
+
+        // Create and redeem a deposit that consumes part of the quota
+        bytes32[] memory ids = new bytes32[](1);
+        uint192[] memory amounts = new uint192[](1);
+        ids[0] = keccak256("quota-partial");
+        amounts[0] = 600e8;
+
+        vm.prank(operator);
+        manager.createDeposits(ids, amounts, operator);
+
+        vm.prank(operator);
+        manager.redeemDeposits(ids, receiver);
+
+        // Immediately after redeem, available = limit - 600
+        assertEq(manager.availableRedemptionQuota(operator), uint256(limit - 600e8));
+
+        uint256 ts1 = block.timestamp + 12 hours;
+        uint256 ts2 = block.timestamp + 24 hours;
+
+        // After 12 hours, refill = limit * 0.5
+        vm.warp(ts1);
+        assertEq(manager.availableRedemptionQuota(operator), uint256(900e8));
+
+        // After another 12 hours, it refills to full (clamped to limit)
+        vm.warp(ts2);
+        assertEq(manager.availableRedemptionQuota(operator), uint256(limit));
+    }
+
+    /// @notice setDailyLimit resets the user's window to full and updates lastRefillTime
+    function testQuota_SetDailyLimitResetsWindow() public {
+        // Start with a limit and consume some
+        uint192 initialLimit = 1_000e8;
+        vm.prank(admin);
+        manager.setDailyLimit(operator, initialLimit);
+
+        // Create and redeem 300e8
+        bytes32[] memory ids = new bytes32[](1);
+        uint192[] memory amounts = new uint192[](1);
+        ids[0] = keccak256("quota-reset");
+        amounts[0] = 300e8;
+        vm.prank(operator);
+        manager.createDeposits(ids, amounts, operator);
+        vm.prank(operator);
+        manager.redeemDeposits(ids, receiver);
+
+        // Sanity: available is initialLimit - 300
+        assertEq(manager.availableRedemptionQuota(operator), uint256(initialLimit - 300e8));
+
+        // Advance time, then reconfigure to a new limit; it should reset to full
+        vm.warp(block.timestamp + 1 hours);
+        uint192 newLimit = 2_000e8;
+        vm.prank(admin);
+        manager.setDailyLimit(operator, newLimit);
+
+        // Window reset: available == newLimit, lastRefillTime == now
+        (uint192 availableAmount, uint64 lastRefillTime) = manager.userRedemptionQuota(operator);
+        assertEq(availableAmount, newLimit, "available should reset to new limit");
+        assertEq(lastRefillTime, uint64(block.timestamp), "lastRefillTime should be updated");
+        assertEq(manager.availableRedemptionQuota(operator), uint256(newLimit), "query should reflect reset");
     }
 }
