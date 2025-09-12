@@ -19,8 +19,6 @@ interface IERC20 {
 ///      total value and fee extraction. Designed for gas-efficient custody accounting.
 /// @author Plusplus AG (dev@plusplus.swiss)
 /// @custom:security-contact security@plusplus.swiss
-/// @custom:audit Custody fee is deducted linearly using `FEE_ANNUAL_PPM`. Ensure business alignment.
-///      Custody fee does not compound. Fee logic assumes 365-day year and 1_000_000 ppm denominator.
 
 contract WBTCDepositManager is AccessControl, ReentrancyGuard, RedemptionLimiter {
     /// @notice Role required to create and redeem deposits as well as collect fees
@@ -33,7 +31,6 @@ contract WBTCDepositManager is AccessControl, ReentrancyGuard, RedemptionLimiter
     IERC20 public immutable WBTC;
 
     /// @notice Annual custody fee in parts per million (ppm). 9_500 = 0.95% per year.
-    /// @custom:audit This fee is applied linearly on principal over time. No compounding.
     uint256 public constant FEE_ANNUAL_PPM = 9_500;
 
     /// @notice Metadata for each individual deposit
@@ -45,7 +42,6 @@ contract WBTCDepositManager is AccessControl, ReentrancyGuard, RedemptionLimiter
     }
 
     /// @notice Mapping from deposit ID to deposit metadata
-    /// @custom:audit The bytes32 identifier is a hash of the customer ID for pseudonymity.
     mapping(bytes32 => Deposit) public deposits;
 
     /// @notice Total principal currently deposited (across all deposits)
@@ -209,7 +205,6 @@ contract WBTCDepositManager is AccessControl, ReentrancyGuard, RedemptionLimiter
     /// @notice Computes the total current value of all deposits, after applying linear custody fees.
     /// @dev Uses global aggregates to calculate total value without looping through individual deposits.
     /// @return totalValue Sum of all remaining principal after fees
-    /// @custom:audit Designed for constant-time computation; assumes correct tracking of global aggregates
     function totalDepositValue() public view returns (uint256 totalValue) {
         uint256 elapsedProduct = block.timestamp * totalPrincipal - principalTimeProductSum;
         uint256 totalFees = elapsedProduct * FEE_ANNUAL_PPM / 1_000_000 / 365 days;
@@ -220,8 +215,6 @@ contract WBTCDepositManager is AccessControl, ReentrancyGuard, RedemptionLimiter
     /// @notice Computes the total accumulated custody fees currently held by the contract.
     /// @dev Calculated as the difference between WBTC balance and total deposit value.
     /// @return fees Amount of WBTC attributable to fees (i.e., not owed to depositors)
-    /// @custom:audit Assumes that all value comes from tracked deposits.
-    ///               If WBTC is sent directly, that should be moved out via `moveWBTC`.
     function accumulatedFees() public view returns (uint256 fees) {
         uint256 totalValue = totalDepositValue();
         uint256 currentBalance = WBTC.balanceOf(address(this));
@@ -233,7 +226,6 @@ contract WBTCDepositManager is AccessControl, ReentrancyGuard, RedemptionLimiter
     /// @dev Only callable by OPERATOR_ROLE. Receiver must have RECEIVER_ROLE.
     /// @param receiver The recipient of the fees
     /// @return collected The amount of fees transferred
-    /// @custom:audit Emits no event; accounting assumed external or off-chain.
     function collectFees(address receiver) external onlyRole(OPERATOR_ROLE) nonReentrant returns (uint256 collected) {
         if (!hasRole(RECEIVER_ROLE, receiver)) revert InvalidReceiver(receiver);
         collected = accumulatedFees();
@@ -248,8 +240,6 @@ contract WBTCDepositManager is AccessControl, ReentrancyGuard, RedemptionLimiter
     /// @param token Address of the token to rescue (use address(0) for ETH)
     /// @param receiver Destination address for the rescued funds
     /// @param amount Amount of tokens or ETH to transfer
-    /// @custom:audit Prevents rescuing WBTC to avoid breaking deposit invariant.
-    /// Emits no event; intended for administrative use.
     function rescueTokens(address token, address receiver, uint256 amount)
         public
         onlyRole(OPERATOR_ROLE)
@@ -270,7 +260,6 @@ contract WBTCDepositManager is AccessControl, ReentrancyGuard, RedemptionLimiter
     /// No internal accounting is updated. Use with caution.
     /// @param receiver Recipient address for the WBTC
     /// @param amount Amount of WBTC to transfer
-    /// @custom:audit Intended for administrative actions only (e.g., migration); bypasses accounting logic
     function moveWBTC(address receiver, uint256 amount) external onlyRole(DEFAULT_ADMIN_ROLE) nonReentrant {
         if (!hasRole(RECEIVER_ROLE, receiver)) revert InvalidReceiver(receiver);
         bool success = WBTC.transfer(receiver, amount);

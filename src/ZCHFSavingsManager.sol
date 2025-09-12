@@ -38,7 +38,6 @@ contract ZCHFSavingsManager is AccessControl, ReentrancyGuard, RedemptionLimiter
 
     /// @notice Annual fee in parts per million (ppm). For example, 12,500 ppm = 1.25% yearly.
     /// @dev Uint24 is used by the savings module for all ppm values.
-    /// @custom:audit Ensure this value matches business expectations and is consistently applied in interest calculations.
     uint24 public constant FEE_ANNUAL_PPM = 12_500;
 
     /// @notice Struct representing a single tracked customer deposit
@@ -124,10 +123,6 @@ contract ZCHFSavingsManager is AccessControl, ReentrancyGuard, RedemptionLimiter
     /// @param identifiers Unique identifiers for each deposit. Is a hash of the customer ID (must not be reused).
     /// @param amounts Corresponding deposit amounts (must match identifiers length, non-zero)
     /// @param source The address providing the ZCHF. If `address(this)`, will skip pulling funds.
-    /// @custom:audit All deposits in a batch tx share the same `ticksAtDeposit` and `createdAt`.
-    /// Verify/confirm that the outcome of a batch deposit creation is exactly the same as several individual deposits in the same block.
-    /// Rounding errors on the tick level are acceptable.
-    /// @custom:audit Since operators are trusted entities, we do not bound the parameter lengths.
     function createDeposits(bytes32[] calldata identifiers, uint192[] calldata amounts, address source)
         external
         onlyRole(OPERATOR_ROLE)
@@ -185,9 +180,6 @@ contract ZCHFSavingsManager is AccessControl, ReentrancyGuard, RedemptionLimiter
     ///      Operators must respect their daily redemption limit.
     /// @param identifiers Unique identifiers (hashed customer IDs) of the deposits to redeem
     /// @param receiver Address that will receive the ZCHF; must have RECEIVER_ROLE
-    /// @custom:audit Emits event before deletion and withdrawal; all state changes precede external call.
-    /// @custom:audit Assumes each identifier was created via `createDeposits()` and that interest can be resolved at current block timestamp.
-    /// @custom:audit Since operators are trusted entities, we do not bound the parameter lengths.
     function redeemDeposits(bytes32[] calldata identifiers, address receiver)
         external
         onlyRole(OPERATOR_ROLE)
@@ -227,14 +219,7 @@ contract ZCHFSavingsManager is AccessControl, ReentrancyGuard, RedemptionLimiter
     /// @param identifier The unique identifier of the deposit
     /// @return initialAmount The originally deposited amount (principal)
     /// @return netInterest The interest accrued after fee deduction
-    /// @custom:audit The deposit is subject to a delay before accruing interest. The fees are calculated over the full duration (including delay).
-    /// @custom:audit Fee logic depends on `FEE_ANNUAL_PPM`; ensure alignment with business rules and edge cases (e.g. short duration).
-    /// @custom:audit The clamp ensures net interest is never negative. We guarantee the return of the principal under normal circumstances.
-    function getDepositDetails(bytes32 identifier)
-        public
-        view
-        returns (uint192 initialAmount, uint192 netInterest)
-    {
+    function getDepositDetails(bytes32 identifier) public view returns (uint192 initialAmount, uint192 netInterest) {
         Deposit storage deposit = deposits[identifier];
 
         initialAmount = deposit.initialAmount;
@@ -300,8 +285,6 @@ contract ZCHFSavingsManager is AccessControl, ReentrancyGuard, RedemptionLimiter
     /// @param token Address of the token to recover (use zero address for ETH)
     /// @param receiver Must have RECEIVER_ROLE
     /// @param amount The amount to recover
-    /// @custom:audit Cannot recover ZCHF if it's already saved — only applies to tokens directly held.
-    /// @custom:audit Ensure no internal accounting relies on ERC-20 balances held in this contract.
     function rescueTokens(address token, address receiver, uint256 amount)
         public
         onlyRole(OPERATOR_ROLE)

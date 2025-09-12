@@ -17,7 +17,7 @@ abstract contract RedemptionLimiter {
     mapping(address => RedemptionQuota) public userRedemptionQuota;
     /// @notice Daily redemption limit per operator (in asset units)
     mapping(address => uint192) public dailyRedemptionLimit;
-    
+
     /// @notice Emitted when a user's daily limit is (re)configured.
     event DailyRedemptionLimitSet(address indexed user, uint192 dailyLimit);
 
@@ -41,7 +41,7 @@ abstract contract RedemptionLimiter {
         emit DailyRedemptionLimitSet(user, dailyLimit);
     }
 
-    /// @notice Consume quota for an arbitrary user 
+    /// @notice Consume quota for an arbitrary user
     /// @dev Recomputes the token-bucket refill since the last update, clamps to limit, then deducts.
     ///      Very small time deltas may result in zero refill due to integer division.
     ///      Reverts with {LimitNotSet} if the user's daily limit is zero.
@@ -79,7 +79,6 @@ abstract contract RedemptionLimiter {
     function _useMyRedemptionQuota(uint256 amount) internal virtual {
         _useRedemptionQuota(msg.sender, amount);
     }
-
 
     /// @notice Compute how much a user could redeem right now, including accrued refill.
     /// @dev Off-chain callers should prefer this view; on-chain callers pay read gas only.
